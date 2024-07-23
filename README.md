@@ -8,3 +8,5 @@ fired_cops.Rmd - my R analysis used in the story "The Police Department for Fire
 total_fired_hired_pct.csv - table showing every Illinois police deparment ordered by the percentage of police officers who were hired directly after being fired from another police department
 
 all_fired_rehired_cops_2000_on.csv - database showing every fired cop in Illinois and the next police department that hired them
+
+My story that used this data: https://illinoisanswers.org/2024/05/06/robbins-police-department-most-hires-of-recently-fired-cops/
