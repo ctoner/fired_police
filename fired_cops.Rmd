@@ -1,0 +1,101 @@
+---
+title: "Fired cops"
+output: html_notebook
+---
+
+
+```{r echo=FALSE, results='hide', message=FALSE}
+library(RPostgreSQL)
+library(knitr)
+options(scipen=999,digits=2)
+options(dplyr.summarise.inform = FALSE)
+knitr::opts_chunk$set(echo = FALSE, cache = TRUE, max.print = -1)
+Sys.setenv(PGPASSWORD="xxxx")
+con <- dbConnect(RPostgres::Postgres(),
+                     dbname="xxxx",
+                 port="xxxx",
+                 host="xxxx",
+                 user="xxxx"
+                 )
+library(dplyr,warn.conflicts = FALSE)
+library(tidyr)
+library(tidyverse) 
+library(ggplot2)
+library(lubridate)
+library(readr)
+library(readxl)
+library(fuzzyjoin)
+
+```
+
+## Identifying and grouping lists of fired and rehired cops from 2000 on
+
+```{sql connection=con, output.var="fired_rehired_cops_appt", echo=FALSE, cache = TRUE}
+SELECT * FROM
+(SELECT * FROM 
+(SELECT  fe.ptbid,
+        fe.first,
+        fe.last,
+        fe.employer,
+        fe.separation,
+        fe.appointed,
+        fe.separated,
+        LEAD(fe.employer, 1) OVER (
+        PARTITION BY fe.ptbid 
+        ORDER BY fe.appointed ASC) next_cop_shop,
+        LEAD(fe.appointed, 1) OVER (
+        PARTITION BY fe.ptbid 
+        ORDER BY fe.appointed ASC) appointment_after_fire
+FROM 
+(SELECT f.ptbid, MAX(f.separated) AS max_date FROM
+(SELECT plur.ptbid,plur.ct FROM 
+(SELECT ptbid, COUNT(*) ct FROM form_es
+GROUP BY ptbid) AS plur 
+WHERE plur.ct > 1) AS mult
+JOIN form_es f USING (ptbid)
+WHERE separation = 'Terminated for Cause'
+GROUP BY f.ptbid) as term
+JOIN form_es fe ON fe.ptbid = term.ptbid) as term
+WHERE separation = 'Terminated for Cause' AND next_cop_shop IS NOT NULL) as every
+WHERE appointment_after_fire >= separated AND appointed >= '2000-01-01'
+```
+
+```{r}
+### remove cases where fired cop joined the same department twice
+fired_rehired_cops_totals_appt <- fired_rehired_cops_appt %>% 
+  group_by(next_cop_shop) %>%
+  distinct(next_cop_shop, ptbid) %>% 
+  ungroup() %>% 
+  group_by(next_cop_shop) %>%
+  summarize(total_fired_cops_rehired=n())
+
+```
+
+
+```{sql connection=con, output.var="all_cops_2000", echo=FALSE, cache = TRUE}
+--- All cops from 2000 on
+SELECT employer, COUNT(DISTINCT ptbid) as total_officers FROM form_es
+WHERE appointed >= '2000-01-01'
+GROUP BY employer
+ORDER BY COUNT(DISTINCT ptbid) DESC
+
+```
+
+```{r}
+#join data
+total_pct <- all_cops_2000 %>%
+  left_join(fired_rehired_cops_totals_appt,by=c("employer"="next_cop_shop")) %>% 
+  mutate(pct=(total_fired_cops_rehired/total_officers)*100) %>% 
+  filter(total_officers >= 100) %>% 
+  arrange(-pct)
+```
+
+```{r}
+#write to csv
+write_csv(fired_rehired_cops_appt, '~/Desktop/robbins_story/all_fired_rehired_cops_2000_on.csv')
+write_csv(total_pct, '~/Desktop/robbins_story/total_fired_hired_pct.csv')
+```
+
+### Appendix
+
+This analysis was was performed on the "Form E" database of police officers (as of 2023-12-12) that is kept by the Illinois Training and Standards Board, which I obtained through a FOIA request. This database contains the name, birth year and individual key for every police officer in Illinois as well the dates of employment and the reason for their exit from every police department in the state.
